@@ -1,0 +1,77 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Mark Hornsby"
+date: "08/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Preamble
+
+*One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har). Note that the data themselves can be found [here (training data)](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [here (testing data)](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).*
+
+#### Loading the data and exploring them
+
+First, let's begin by loading the data and related packages, and exploring them:
+
+```{r}
+library(ggplot2)
+library(caret)
+library(AppliedPredictiveModeling)
+library(lattice)
+training<-read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")) #"classe" variable is what we're trying to predict
+testing<-read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")) #"classe" variable is what we're trying to predict
+```
+```{}
+head(training)
+dim(training)
+summary(training)
+str(training)
+```
+
+The ```training``` dataset is large, and contains a lot of missing values. Interesting, a lot of data are also missnig from the testing dataset. And, the testing data contain entire columns of missing values. Since we need to use test set for our literal test of model predictive value, We'll use this dataset as the basis for which to initially clean up our training data. As such:
+
+```{r}
+library(janitor)
+testing<-remove_empty(testing, which = c("rows", "cols"))
+keep<-colnames(testing)
+keep[length(keep)+1]<-"classe" # needed to add this since "classe" is not a variable included in the testing data
+training<-training[, (names(training) %in% keep)]
+```
+So this leaves us with 60 variables in the training set, and 60 in the test set. However, looking more at ```str(training)``` reveals some additional columns that are probably poor predictors -- specifically, ```training$X``` which is just a a monotonically-increasing count of the number of rows; and the three variables with the word ```timestamp``` in them. Let's go ahead and remove those, too. Will also convert ```classe``` to a factor, as it's currently a character.
+
+```{r}
+training$classe<-as.factor(training$classe)
+drop<-c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp")
+training<-training[ , !(names(training) %in% drop)]
+testing<-testing[ , !(names(testing) %in% drop)]
+```
+#### Digging in
+Now that we've cleaned our data, let's split ```training``` into "sub" training and testing datasets for our cross-validation:
+```{r}
+set.seed(453164)
+partition <- createDataPartition(y=training$classe, p=3/4, list=FALSE)
+training_train <- training[partition, ]
+training_test <- training[-partition, ]
+```
+Random forests are probably going to be our go-to here since the variable we're trying to predict is not numeric, and therefore, methods like linear regression don't really make a lot of sense to use. 
+```{r}
+library(randomForest)
+fit<-randomForest(classe~., data=training_train, method="class")
+fit
+fit.predict<-predict(fit,training_test, type='class')
+accuracy<-confusionMatrix(fit.predict,training_test$classe)
+accuracy$overall["Accuracy"]
+varImpPlot(fit)
+```
+As we can see, the overall accuracy here is dang high -- 99.8%, with an out-of-bag error estimate of 0.22%. Interestingly, ```num_window``` came out as the predictor with the most importance for classification. I would have liked to try boosting the data to see if I could get a more-accurate model; however, the computation took far too long (it never actually finished...), so, this is it I suppose! 
+
+Now let's try it with the actual test data:
+```{r}
+test.predict<-predict(fit, newdata=testing, type='class')
+test.predict
+```
+And that's that!
